@@ -9,6 +9,4 @@ frontend/dist/
 # Backend (Express)
 # ===========================
 backend/node_modules/
-backend/dist/
-backend/logs/
 backend/.env
