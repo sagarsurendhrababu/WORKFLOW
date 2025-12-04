@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [labeled]
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   sync:
     runs-on: ubuntu-latest
@@ -13,6 +17,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Git
         run: |
@@ -21,45 +26,27 @@ jobs:
 
       - name: Create Sync Branch and PR
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LABEL="${{ github.event.label.name }}"
           PR="${{ github.event.pull_request.number }}"
           SOURCE="${{ github.event.pull_request.head.ref }}"
 
           case "$LABEL" in
-
-            dev)
-              TARGET="dev"
-              ;;
-
+            dev) TARGET="dev" ;;
             stage)
-              if [[ "$SOURCE" == "dev" ]]; then
-                TARGET="stage"
-              else
-                exit 0
-              fi
+              [[ "$SOURCE" == "dev" ]] || exit 0
+              TARGET="stage"
               ;;
-
             release)
-              if [[ "$SOURCE" == "stage" ]]; then
-                TARGET="release"
-              else
-                exit 0
-              fi
+              [[ "$SOURCE" == "stage" ]] || exit 0
+              TARGET="release"
               ;;
-
             main)
-              if [[ "$SOURCE" == "release" ]]; then
-                TARGET="main"
-              else
-                exit 0
-              fi
+              [[ "$SOURCE" == "release" ]] || exit 0
+              TARGET="main"
               ;;
-
-            *)
-              exit 0
-              ;;
+            *) exit 0 ;;
           esac
 
           SYNC_BRANCH="sync/${PR}-${TARGET}"
@@ -69,16 +56,9 @@ jobs:
           git checkout -b "$SYNC_BRANCH"
           git push -f origin "$SYNC_BRANCH"
 
-          SYNC_OUTPUT=$(gh pr create \
+          gh pr create \
             --base "$TARGET" \
             --head "$SYNC_BRANCH" \
             --title "Sync from $SOURCE to $TARGET" \
-            --body "Sync PR created for original PR #$PR" \
-            --label "sync" 2>&1 || true)
-
-          SYNC_PR_URL=$(echo "$SYNC_OUTPUT" | grep -Eo "https://github.com[^ ]+")
-          if [ -z "$SYNC_PR_URL" ]; then
-            SYNC_PR_URL=$(gh pr list --head "$SYNC_BRANCH" --base "$TARGET" --state open --limit 1 | awk '{print $NF}')
-          fi
-
-          gh pr comment "$PR" --body "Sync PR created: ${SYNC_PR_URL}"
+            --body "Sync PR created for #$PR" \
+            --label "sync"
