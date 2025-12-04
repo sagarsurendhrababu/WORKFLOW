@@ -28,7 +28,11 @@ jobs:
           SOURCE="${{ github.event.pull_request.head.ref }}"
 
           # Only run for allowed labels
+<<<<<<< HEAD
+          if [[ "$LABEL" == "dev" || "$LABEL" == "stage" ]]; then
+=======
           if [[ "$LABEL" == "dev" || "$LABEL" == "stage" || "$LABEL" == "release" || "$LABEL" == "main" ]]; then
+>>>>>>> release
             TARGET="$LABEL"
 
             # UNIQUE SYNC BRANCH NAME
