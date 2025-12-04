@@ -1,0 +1,66 @@
+name: Sync Branch on Label
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git credentials
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create sync branch and PR
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          LABEL="${{ github.event.label.name }}"
+          PR="${{ github.event.pull_request.number }}"
+          SOURCE="${{ github.event.pull_request.head.ref }}"
+
+          if [[ "$LABEL" == "dev" || "$LABEL" == "stage" ]]; then
+            TARGET="$LABEL"
+            SYNC_BRANCH="sync/${PR}-${TARGET}"
+
+            echo "Creating sync branch: $SYNC_BRANCH"
+            git checkout "$SOURCE"
+            git pull origin "$SOURCE"
+            git checkout -b "$SYNC_BRANCH"
+            git push -f origin "$SYNC_BRANCH"
+
+            echo "Creating Sync PR..."
+            SYNC_OUTPUT=$(gh pr create \
+              --base "$TARGET" \
+              --head "$SYNC_BRANCH" \
+              --title "Sync: PR #$PR → $TARGET" \
+              --body "Auto sync PR created for original PR #$PR" \
+              --label "sync" 2>&1 || true)
+
+            echo "$SYNC_OUTPUT"
+
+            # Extract URL (works even on older gh versions)
+            SYNC_PR_URL=$(echo "$SYNC_OUTPUT" | grep -Eo "https://github.com[^ ]+")
+            echo "Sync PR URL: $SYNC_PR_URL"
+
+            if [ -z "$SYNC_PR_URL" ]; then
+              echo "Trying fallback: listing PR..."
+              SYNC_PR_URL=$(gh pr list --head "$SYNC_BRANCH" --base "$TARGET" --state open --limit 1 | awk '{print $NF}')
+            fi
+
+            echo "Final Sync PR URL: $SYNC_PR_URL"
+
+            echo "Commenting Sync PR link on original PR..."
+            gh pr comment "$PR" --body "🔁 **Sync PR created:** $SYNC_PR_URL"
+
+          else
+            echo "Label is not dev or stage, skipping."
+          fi

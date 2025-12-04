@@ -1,0 +1,12 @@
+
+# ===========================
+# Vite (Frontend)
+# ===========================
+frontend/node_modules/
+frontend/dist/
+
+# ===========================
+# Backend (Express)
+# ===========================
+backend/node_modules/
+backend/.env
