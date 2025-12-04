@@ -24,16 +24,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           LABEL="${{ github.event.label.name }}"
-          PR="${{ github.event.pull_request.number }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
           SOURCE="${{ github.event.pull_request.head.ref }}"
 
+          # Only run for allowed labels
           if [[ "$LABEL" == "dev" || "$LABEL" == "stage" ]]; then
             TARGET="$LABEL"
-            SYNC_BRANCH="sync/${PR}-${TARGET}"
+
+            # UNIQUE SYNC BRANCH NAME
+            SYNC_BRANCH="sync/pr-${PR_NUMBER}-${LABEL}"
 
             echo "Creating sync branch: $SYNC_BRANCH"
+
             git checkout "$SOURCE"
             git pull origin "$SOURCE"
+
+            # Create unique sync branch
             git checkout -b "$SYNC_BRANCH"
             git push -f origin "$SYNC_BRANCH"
 
@@ -41,16 +47,17 @@ jobs:
             SYNC_OUTPUT=$(gh pr create \
               --base "$TARGET" \
               --head "$SYNC_BRANCH" \
-              --title "Sync: PR #$PR → $TARGET" \
-              --body "Auto sync PR created for original PR #$PR" \
+              --title "Sync: PR #$PR_NUMBER → $TARGET" \
+              --body "Auto sync PR created for original PR #$PR_NUMBER" \
               --label "sync" 2>&1 || true)
 
             echo "$SYNC_OUTPUT"
 
-            # Extract URL (works even on older gh versions)
+            # Extract PR URL
             SYNC_PR_URL=$(echo "$SYNC_OUTPUT" | grep -Eo "https://github.com[^ ]+")
             echo "Sync PR URL: $SYNC_PR_URL"
 
+            # Fallback if URL not detected
             if [ -z "$SYNC_PR_URL" ]; then
               echo "Trying fallback: listing PR..."
               SYNC_PR_URL=$(gh pr list --head "$SYNC_BRANCH" --base "$TARGET" --state open --limit 1 | awk '{print $NF}')
@@ -59,7 +66,7 @@ jobs:
             echo "Final Sync PR URL: $SYNC_PR_URL"
 
             echo "Commenting Sync PR link on original PR..."
-            gh pr comment "$PR" --body "🔁 **Sync PR created:** $SYNC_PR_URL"
+            gh pr comment "$PR_NUMBER" --body "🔁 **Sync PR created:** $SYNC_PR_URL"
 
           else
             echo "Label is not dev or stage, skipping."
