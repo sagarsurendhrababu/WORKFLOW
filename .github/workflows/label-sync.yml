@@ -14,12 +14,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: Setup Git credentials
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create Sync Branch and PR
+      - name: Create sync branch and PR
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
@@ -27,58 +27,40 @@ jobs:
           PR="${{ github.event.pull_request.number }}"
           SOURCE="${{ github.event.pull_request.head.ref }}"
 
-          case "$LABEL" in
+          if [[ "$LABEL" == "dev" || "$LABEL" == "stage" ]]; then
+            TARGET="$LABEL"
+            SYNC_BRANCH="sync/${PR}-${TARGET}"
 
-            dev)
-              TARGET="dev"
-              ;;
+            echo "Creating sync branch: $SYNC_BRANCH"
+            git checkout "$SOURCE"
+            git pull origin "$SOURCE"
+            git checkout -b "$SYNC_BRANCH"
+            git push -f origin "$SYNC_BRANCH"
 
-            stage)
-              if [[ "$SOURCE" == "dev" ]]; then
-                TARGET="stage"
-              else
-                exit 0
-              fi
-              ;;
+            echo "Creating Sync PR..."
+            SYNC_OUTPUT=$(gh pr create \
+              --base "$TARGET" \
+              --head "$SYNC_BRANCH" \
+              --title "Sync: PR #$PR → $TARGET" \
+              --body "Auto sync PR created for original PR #$PR" \
+              --label "sync" 2>&1 || true)
 
-            release)
-              if [[ "$SOURCE" == "stage" ]]; then
-                TARGET="release"
-              else
-                exit 0
-              fi
-              ;;
+            echo "$SYNC_OUTPUT"
 
-            main)
-              if [[ "$SOURCE" == "release" ]]; then
-                TARGET="main"
-              else
-                exit 0
-              fi
-              ;;
+            # Extract URL (works even on older gh versions)
+            SYNC_PR_URL=$(echo "$SYNC_OUTPUT" | grep -Eo "https://github.com[^ ]+")
+            echo "Sync PR URL: $SYNC_PR_URL"
 
-            *)
-              exit 0
-              ;;
-          esac
+            if [ -z "$SYNC_PR_URL" ]; then
+              echo "Trying fallback: listing PR..."
+              SYNC_PR_URL=$(gh pr list --head "$SYNC_BRANCH" --base "$TARGET" --state open --limit 1 | awk '{print $NF}')
+            fi
 
-          SYNC_BRANCH="sync/${PR}-${TARGET}"
+            echo "Final Sync PR URL: $SYNC_PR_URL"
 
-          git checkout "$SOURCE"
-          git pull origin "$SOURCE"
-          git checkout -b "$SYNC_BRANCH"
-          git push -f origin "$SYNC_BRANCH"
+            echo "Commenting Sync PR link on original PR..."
+            gh pr comment "$PR" --body "🔁 **Sync PR created:** $SYNC_PR_URL"
 
-          SYNC_OUTPUT=$(gh pr create \
-            --base "$TARGET" \
-            --head "$SYNC_BRANCH" \
-            --title "Sync from $SOURCE to $TARGET" \
-            --body "Sync PR created for original PR #$PR" \
-            --label "sync" 2>&1 || true)
-
-          SYNC_PR_URL=$(echo "$SYNC_OUTPUT" | grep -Eo "https://github.com[^ ]+")
-          if [ -z "$SYNC_PR_URL" ]; then
-            SYNC_PR_URL=$(gh pr list --head "$SYNC_BRANCH" --base "$TARGET" --state open --limit 1 | awk '{print $NF}')
+          else
+            echo "Label is not dev or stage, skipping."
           fi
-
-          gh pr comment "$PR" --body "Sync PR created: ${SYNC_PR_URL}"
